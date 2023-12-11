@@ -11,6 +11,7 @@ library(mitools)
 library(lubridate)
 library(progress)
 library(glue)
+library(janitor)
 options(scipen = 9999)
 set.seed(666)
 
@@ -175,7 +176,7 @@ team_agg <- team_agg_base %>%
          new_avg.points = total_points/row_number() ,
          prev_points = total_points - points ,
          prev_game = row_number() - 1 ,
-         avg.points = prev_points / prev_game ,
+         points.avg = prev_points / prev_game ,
          prev_wins = ifelse(is.na(win), sum(win, na.rm = TRUE),
                             ifelse(win ==1, cumsum(win) - 1, cumsum(win))) ,
          prev_cover = ifelse(is.na(ats_cover), sum(ats_cover, na.rm = TRUE),
@@ -192,7 +193,8 @@ team_agg <- team_agg_base %>%
                                       ifelse(ats_home_dog_cover ==1, cumsum(ats_home_dog_cover) - 1, cumsum(ats_home_dog_cover))) ,
          prev_away_dog_cover = ifelse(is.na(ats_away_dog_cover), sum(ats_away_dog_cover, na.rm = TRUE),
                                       ifelse(ats_away_dog_cover ==1, cumsum(ats_away_dog_cover) - 1, cumsum(ats_away_dog_cover))) ,
-
+         prev_wins_adj.avg = prev_wins * (prev_game/22) ,
+         prev_cover_adj.avg = prev_cover * (prev_game/22)
          ) %>%
   arrange(game_id) # %>%
 # select(game_id , team_ , points , prev_points , new_avg.points , avg.points) %>%
@@ -213,3 +215,26 @@ outcomes <- games %>%
          home_win = ifelse(result > 0  , 1 , 0) ,
          home_cover = ifelse(linedif > 0 , 1 , 0)
          )
+
+print("Loading NFL Helper Functions")
+source("~/Projects/nfl_modeling2/scripts/NFL Helper Functions.R")
+
+# RESULT model pre-processing
+modeldata <- create_modeldata("result") %>% na.omit()
+
+# Find correlated predictors
+
+# full_cor <- cor(modeldata[2:ncol(modeldata)])
+# findCorrelation(full_cor , names = T , cutoff =  .8)
+# full_cor[ , findCorrelation(full_cor , names = T , cutoff =  .7)] %>% View()
+
+drop_cols <- c("prev_wins" , "prev_wins.away" ,  "prev_points" , "prev_points.away" ,
+               "prev_cover" , "prev_cover.away" , "prev_game" , "prev_game.away"  ,
+               "epa_play.avg" , "epa_play.avg.away" , "pass.comp.avg.away" , "pass.comp.avg" ,
+               "pass_plays.avg.away" , "pass_plays.avg" , "prev_home_cover" , "prev_away_cover" ,
+               "prev_home_fav_cover" , "prev_away_fav_cover" , "prev_home_dog_cover" , "prev_away_dog_cover" ,
+               "prev_home_cover.away" , "prev_away_cover.away" , "prev_home_fav_cover.away" , "prev_away_fav_cover.away" ,
+               "prev_home_dog_cover.away" , "prev_away_dog_cover.away" )
+modeldata <- modeldata %>% select(-drop_cols)
+
+
