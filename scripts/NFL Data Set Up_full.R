@@ -1,5 +1,5 @@
 # LIBRARIES #####
-setwd("~/Projects/nfl_modeling")
+setwd("~/Projects/nfl_modeling2")
 library(tidyverse)
 library(devtools)
 library(nflfastR)
@@ -12,6 +12,9 @@ library(lubridate)
 library(progress)
 library(glue)
 library(janitor)
+library(parallel)
+library(doParallel)
+library(caret)
 options(scipen = 9999)
 set.seed(666)
 
@@ -210,7 +213,7 @@ alldata <- games %>%
   #        contains("prev")
   #        )
 outcomes <- games %>%
-  select(game_id , season , week , home_team , away_team , result , spread_line) %>%
+  select(game_id , season , week , home_team , away_team , home_score , away_score , result , spread_line) %>%
   mutate(linedif = result + spread_line ,
          home_win = ifelse(result > 0  , 1 , 0) ,
          home_cover = ifelse(linedif > 0 , 1 , 0)
@@ -227,14 +230,3 @@ modeldata <- create_modeldata("result") %>% na.omit()
 # full_cor <- cor(modeldata[2:ncol(modeldata)])
 # findCorrelation(full_cor , names = T , cutoff =  .8)
 # full_cor[ , findCorrelation(full_cor , names = T , cutoff =  .7)] %>% View()
-
-drop_cols <- c("prev_wins" , "prev_wins.away" ,  "prev_points" , "prev_points.away" ,
-               "prev_cover" , "prev_cover.away" , "prev_game" , "prev_game.away"  ,
-               "epa_play.avg" , "epa_play.avg.away" , "pass.comp.avg.away" , "pass.comp.avg" ,
-               "pass_plays.avg.away" , "pass_plays.avg" , "prev_home_cover" , "prev_away_cover" ,
-               "prev_home_fav_cover" , "prev_away_fav_cover" , "prev_home_dog_cover" , "prev_away_dog_cover" ,
-               "prev_home_cover.away" , "prev_away_cover.away" , "prev_home_fav_cover.away" , "prev_away_fav_cover.away" ,
-               "prev_home_dog_cover.away" , "prev_away_dog_cover.away" )
-modeldata <- modeldata %>% select(-drop_cols)
-
-
