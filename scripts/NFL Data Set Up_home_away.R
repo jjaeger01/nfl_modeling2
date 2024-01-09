@@ -360,4 +360,10 @@ outcomes <- games %>%
          home_cover = ifelse(linedif > 0 , 1 , 0)
   )
 
+print("Loading NFL Helper Functions")
+source("~/Projects/nfl_modeling2/scripts/NFL Helper Functions.R")
+
+# RESULT model pre-processing
+modeldata <- create_modeldata("result" , drop_cols_ = F) %>% na.omit()
+
 

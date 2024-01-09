@@ -16,14 +16,14 @@ for(i in 1:15){
   test_ <- modeldata %>% na.omit() %>% filter(substr(game_id , 1 , 4) >= 2023)
 
   result_fit <- model_outcome(outcome_ = "result" ,
-                                  method_ = "glmStepAIC" ,
+                                  method_ = "svmPoly" ,
                                   resample_ = 5 ,
                                   repeats_ = 5)
 
   results_df <- pred_outcomes(test = test_ , outcome_ = "result")
 
   accuracy <- mean(results_df$model_win)
-  out <- list(model = home_cover_fit, results_df = results_df , accuracy = accuracy)
+  out <- list(model = result_fit, results_df = results_df , accuracy = accuracy)
   outlist[[i]] <-  out
 }
 stop_time <- Sys.time()

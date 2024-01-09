@@ -50,6 +50,7 @@ update_pbp <- function(update = FALSE , current_season){
   } else {
     print("UPDATING PLAY-BY-PLAY DATA")
     pbp <- load_pbp(2010:current_season)
+    save(games, file = "data-raw/games.rdata")
     save(pbp, file = "data-raw/pbp.rdata")
   }
   # pbp <- ifelse(update == T , load_pbp(2000:current_season) , pbp)
@@ -218,7 +219,8 @@ outcomes <- games %>%
          home_win = ifelse(result > 0  , 1 , 0) ,
          home_cover = ifelse(linedif > 0 , 1 , 0)
          )
-
+save(games, file = "data/alldata.rdata")
+save(games, file = "data/games.rdata")
 print("Loading NFL Helper Functions")
 source("~/Projects/nfl_modeling2/scripts/NFL Helper Functions.R")
 
