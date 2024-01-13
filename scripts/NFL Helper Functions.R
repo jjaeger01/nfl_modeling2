@@ -93,11 +93,11 @@ game_outcomes <- function(game_data_){
   return(game_outcomes_)
 }
 
-pred_outcomes <- function(test , outcome_ = "result"){
+pred_outcomes <- function(test , outcome_ = "result" , fit_){ # Generate predictions for a test dataset. User supplies test data and outcome
   test_outcomes <- game_outcomes(test)
   if(outcome_ == "result"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(result_fit , test) ,
+      pred = predict(fit_ , test) ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
@@ -107,7 +107,7 @@ pred_outcomes <- function(test , outcome_ = "result"){
   }
   if(outcome_ == "linedif"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(result_fit , test) ,
+      pred = predict(fit_ , test) ,
       pred_linedif = pred  ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse((pred - spread_line) > 0 , 1 , 0) ,
@@ -117,7 +117,7 @@ pred_outcomes <- function(test , outcome_ = "result"){
   }
   if(outcome_ == "spread_line"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(result_fit , test) ,
+      pred = predict(fit_ , test) ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
@@ -127,8 +127,8 @@ pred_outcomes <- function(test , outcome_ = "result"){
   }
   if(outcome_ == "home_away_score"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred_home_score = predict(home_fit , test) ,
-      pred_away_score = predict(away_fit , test) ,
+      pred_home_score = predict(fit_ , test) ,
+      pred_away_score = predict(fit_ , test) ,
       pred = pred_home_score - pred_away_score ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
@@ -139,7 +139,7 @@ pred_outcomes <- function(test , outcome_ = "result"){
   }
   if(outcome_ == "home_cover"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = as.numeric(as.character(predict(home_cover_fit , test))) ,
+      pred = as.numeric(as.character(predict(fit_ , test))) ,
       pred_cover = pred ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
     )
