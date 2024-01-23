@@ -8,6 +8,7 @@ create_modeldata <- function(outcome_ = "result" , drop_cols_ = T){
            contains("prev")
            ) %>%
     rename_with(~str_replace(.,".prev_avg" , ".avg") , contains(".prev_avg"))
+  modeldata %>% filter(!is.na(outcome_)) %>% select(all_of(outcome_)) %>% unique()
   if(drop_cols_ == T){
     drop_cols <- c("prev_wins" , "prev_wins.away" ,  "prev_points" , "prev_points.away" ,
                    "prev_cover" , "prev_cover.away" , "prev_game" , "prev_game.away"  ,
@@ -26,15 +27,15 @@ build_current_week <- function(season_ , week_ , outcome_ = "result"){
   pull_season <- ifelse(week_ == 1 , season_ - 1 , season_)
   pull_week_ <- ifelse(week_ == 1 , ifelse(season_ > 2020 , 18  , 17), week_ - 1)
   current_week <- alldata %>%
-    select(season, week , game_id , home_team , away_team ) %>%
+    select("season", "week" , "game_id" , "home_team" , "away_team" , outcome_ , "div_game" ,  "spread_line" ,) %>%
     mutate(pull_week = pull_week_) %>%
     filter(season == season_ , week == week_) %>%
     left_join(team_agg %>% filter(season == pull_season , week == pull_week_) %>%
-                select("game_id" , outcome_ , "div_game" , "spread_line" ,  contains("post") , starts_with("prev_"))  ,
+                select("game_id" , contains("post") , starts_with("prev_"))  ,
               by = join_by(home_team == posteam) , suffix = c("" , ".y")) %>%
     select(-ends_with(".y")) %>%
     left_join(team_agg %>% filter(season == pull_season , week == pull_week_) %>%
-                select("game_id" , outcome_ , "div_game" ,  "spread_line" ,  contains("post") , starts_with("prev_"))  ,
+                select("game_id" , contains("post") , starts_with("prev_"))  ,
               by = join_by(away_team == posteam) , suffix = c("" , ".away")) %>%
     rename_with(~ str_remove(., "post_"), everything())
   return(current_week)
@@ -56,7 +57,8 @@ build_formula <- function(outcome_){
 # Apply caret model training using a user-chosen outcome and modeling method
 model_outcome <- function(outcome_ ,
                           method_ = "lm" ,
-                          train__ = train_  ,
+                          train__ ,
+                          outcome_type_ = "cont" ,
                           formula__ = "simple" ,
                           resample_ = 5 ,
                           repeats_ = 5 ,
@@ -64,7 +66,9 @@ model_outcome <- function(outcome_ ,
 
   cl <- makePSOCKcluster(clusters_)
   registerDoParallel(cl)
-
+  if(outcome_type_ == "cat"){
+    train__[[outcome_]] <- factor(train__[[outcome_]])
+  }
   fitControl <- trainControl(## 10-fold CV
     method = "repeatedcv",
     number = resample_,
@@ -72,16 +76,18 @@ model_outcome <- function(outcome_ ,
     repeats = resample_)
 
   if(formula__ == "simple"){
-    formula_ <- formula(paste(outcome_ , " ~ ."))
+    model_formula <- formula(paste(outcome_ , " ~ ."))
   }
   if(formula__ == "int"){
-    formula_ <- formula(paste(outcome_ , " ~ .^2"))
+    model_formula <- formula(paste(outcome_ , " ~ .^2"))
   }
 
   # Fit model
-  fit_ <- train(formula_ , data = train__[-1],
+  fit_ <- train(model_formula ,
+                data = train__[-1],
                 method = method_ ,
                 trControl = fitControl,
+
   )
   stopCluster(cl)
   return(fit_)
