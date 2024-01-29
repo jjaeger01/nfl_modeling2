@@ -8,7 +8,7 @@ create_modeldata <- function(outcome_ = "result" , drop_cols_ = T){
            contains("prev")
            ) %>%
     rename_with(~str_replace(.,".prev_avg" , ".avg") , contains(".prev_avg"))
-  modeldata %>% filter(!is.na(outcome_)) %>% select(all_of(outcome_)) %>% unique()
+  modeldata %>% filter(!is.na(outcome_[1])) %>% select(all_of(outcome_)) %>% unique()
   if(drop_cols_ == T){
     drop_cols <- c("prev_wins" , "prev_wins.away" ,  "prev_points" , "prev_points.away" ,
                    "prev_cover" , "prev_cover.away" , "prev_game" , "prev_game.away"  ,
@@ -99,11 +99,37 @@ game_outcomes <- function(game_data_){
   return(game_outcomes_)
 }
 
-pred_outcomes <- function(test , outcome_ = "result" , fit_){ # Generate predictions for a test dataset. User supplies test data and outcome
-  test_outcomes <- game_outcomes(test)
+pred_outcomes <- function(test , # Generate predictions for a test dataset. User supplies test data, model, and outcome
+                          outcome_ = "result" ,
+                          outcome_type = "cont" ,
+                          fit_ ,
+                          ensemble_ = F){
+  if(outcome_type == "cont" & ensemble_ == F){
+    test_outcomes <- game_outcomes(test) %>%
+      mutate(pred = predict(fit_ , test))
+  }
+  if(outcome_type == "cat" & ensemble_ == F){
+    test_outcomes <- game_outcomes(test) %>%
+      mutate(pred = as.numeric(as.character(predict(fit_ , test))))
+  }
+  if(ensemble_ == T){
+    if(outcome_type == "cat"){
+      test_outcomes <- game_outcomes(test) %>%
+        mutate(linedif = spread_line + result ,
+               avg_pred = rowMeans(test %>% select(matches("pred"))) ,
+               pred = ifelse(avg_pred >  best_thresh , 1 , 0) ,
+               # does_count = ifelse(avg_pred > 0.8 , T , F) ,
+        )
+    }
+    if(outcome_type == "cont"){
+      test_outcomes <- game_outcomes(test) %>%
+        mutate(linedif = spread_line + result ,
+               pred = rowMeans(test %>% select(matches("pred"))) ,
+        )
+    }
+  }
   if(outcome_ == "result"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(fit_ , test) ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
@@ -113,7 +139,6 @@ pred_outcomes <- function(test , outcome_ = "result" , fit_){ # Generate predict
   }
   if(outcome_ == "linedif"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(fit_ , test) ,
       pred_linedif = pred  ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse((pred - spread_line) > 0 , 1 , 0) ,
@@ -123,7 +148,6 @@ pred_outcomes <- function(test , outcome_ = "result" , fit_){ # Generate predict
   }
   if(outcome_ == "spread_line"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = predict(fit_ , test) ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
@@ -145,10 +169,29 @@ pred_outcomes <- function(test , outcome_ = "result" , fit_){ # Generate predict
   }
   if(outcome_ == "home_cover"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred = as.numeric(as.character(predict(fit_ , test))) ,
       pred_cover = pred ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
     )
   }
+  if(outcome_ == "home_win"){
+    test_outcomes <- test_outcomes %>% mutate(
+      pred_win = pred ,
+      model_win = ifelse(pred_win ==   home_win  , 1 , 0) ,
+    )
+  }
   return(test_outcomes)
 }
+
+
+log_model_run <- function(model_run_ ,
+                          con_ = NULL ,
+                          table_ = "model_runs_v1"){
+  library(DBI)
+  if(is.null(con_)){
+    con_ <- dbConnect(RSQLite::SQLite() , "data/model_runs_db.db")
+  }
+  dbWriteTable(con_ , table_ , model_run_$model_info , append = T)
+  dbDisconnect(con_)
+  print(paste("Model run logged in table " , table_))
+}
+

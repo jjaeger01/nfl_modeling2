@@ -1,4 +1,20 @@
+if(!exists("pbp")){
+  source("~/Projects/nfl_modeling2/scripts/NFL Data Set Up_full.R")
+}
+
 # Turn multi-runs into a function ?
+
+# outcome_ = "home_cover"
+# clusters_ = 10
+# model_runs_ =  10
+# outcome_type_ = "cat"
+# method__ = "xgbTree"
+# test_season = 2023
+# resample__  = 5
+# repeats__  = 5
+# ensemble = T
+# formula__ = "simple"
+# log_model_run_ = F
 
 run_NFL_model <- function(outcome_ = "result" ,
                           model_runs_ = 10 ,
@@ -59,7 +75,7 @@ run_NFL_model <- function(outcome_ = "result" ,
     )
     stopCluster(cl)
 
-    results_df <- pred_outcomes(test = test_ , outcome_ = outcome_ , fit_ = fit_)
+    results_df <- pred_outcomes(test = test_ , outcome_ = outcome_ , outcome_type = outcome_type_ , fit_ = fit_)
 
     accuracy <- mean(results_df$model_win)
     out <- list(model = fit_, results_df = results_df , accuracy = accuracy)
@@ -101,78 +117,62 @@ run_NFL_model <- function(outcome_ = "result" ,
   # }
   if(ensemble == T){ # For each game, extract the prediction from each model run, compile into one dataframe
 
-    ensemble_predictions <- tibble(train__ %>% game_outcomes() %>% select(game_id , result , spread_line , home_cover))
+    ensemble_predictions <- tibble(train__ %>% game_outcomes() %>% select(game_id , result , spread_line , outcome_))
     for(i in 1:model_runs_){
       pred <- ensemble_predictions %>% mutate(pred = as.numeric(as.character(predict(outlist[[i]]$model , train__)))) %>% select(game_id , pred)
       ensemble_predictions <- ensemble_predictions %>% left_join(pred , by = "game_id" , suffix = c("",i))
     }
     threshold_mean_model_wins <- tibble()
     i <- 0
-    while(i <= 1){ # Find optimal threshold for predicting 1 based on the average of all ensemble_predictions [0 , 1]
-      threshold_mean_model_wins <- bind_rows(threshold_mean_model_wins,
-                                             bind_cols( threshold = i ,
-                                                        model_win = ensemble_predictions %>%
-                                        mutate(linedif = spread_line + result ,
-                                               avg_pred = rowMeans(ensemble_predictions %>% select(matches("pred"))) ,
-                                               pred_ = ifelse(avg_pred > i , 1 , 0) ,
-                                               does_count = ifelse(avg_pred >= 0.8 , T , F) ,
-                                               model_win = ifelse(pred_ == home_cover , 1 , 0)
-                                        )  %>%
-                                      pull(model_win) %>% mean()
-                                             )
-        # View()
-        # filter(avg_pred == 0.8) %>%
-        # View(".8")
-        # tabyl(model_win , pred_) %>% adorn_totals("row")
-      )
-      i <- i + 0.01
+    if(outcome_type_ == "cat"){
+      while(i < 1){ # Find optimal threshold for predicting 1 based on the average of all ensemble_predictions [0 , 1]
+        threshold_mean_model_wins <- bind_rows(threshold_mean_model_wins,
+                                               bind_cols( threshold = i ,
+                                                          model_win = ensemble_predictions %>%
+                                          mutate(linedif = spread_line + result ,
+                                                 avg_pred = rowMeans(ensemble_predictions %>% select(matches("pred"))) ,
+                                                 pred_ = ifelse(avg_pred > i , 1 , 0) ,
+                                                 does_count = ifelse(avg_pred >= 0.8 , T , F) ,
+                                                 model_win = ifelse(pred_ == .[outcome_] , 1 , 0)
+                                          )  %>%
+                                        pull(model_win) %>% mean()
+                                               )
+          # View()
+          # filter(avg_pred == 0.8) %>%
+          # View(".8")
+          # tabyl(model_win , pred_) %>% adorn_totals("row")
+        )
+        i <- i + 0.01
+      }
+
+      colnames(threshold_mean_model_wins) <- c("threshold" , "model_win")
+      best_thresh <- min(threshold_mean_model_wins$threshold[threshold_mean_model_wins$model_win == max(threshold_mean_model_wins$model_win)])
+      print(paste("Optimal threshold for ensemble prediction is " , best_thresh))
     }
 
-
-    colnames(threshold_mean_model_wins) <- c("threshold" , "model_win")
-    best_thresh <- min(threshold_mean_model_wins$threshold[threshold_mean_model_wins$model_win == max(threshold_mean_model_wins$model_win)])
-    print(paste("Optimal threshold for ensemble prediction is " , best_thresh))
-
-    ensemble_predictions_test <- tibble(test_ %>% game_outcomes() %>% select(game_id , result , spread_line , home_cover))
+    ensemble_predictions_test <- tibble(test_ %>% game_outcomes() %>% select(game_id , result , spread_line , outcome_))
     for(i in 1:model_runs_){
       pred <- test_ %>% mutate(pred = as.numeric(as.character(predict(outlist[[i]]$model , test_)))) %>% select(game_id , pred)
       ensemble_predictions_test <- ensemble_predictions_test %>% left_join(pred , by = "game_id" , suffix = c("",i))
     }
 
-    ensemble_result_df <-   ensemble_predictions_test %>%
-      game_outcomes() %>%
-      mutate(linedif = spread_line + result ,
-             avg_pred = rowMeans(ensemble_predictions_test %>% select(matches("pred"))) ,
-             pred_ = ifelse(avg_pred >  best_thresh , 1 , 0) ,
-             # does_count = ifelse(avg_pred > 0.8 , T , F) ,
-             model_win = ifelse(pred_ == home_cover , 1 , 0)
-      )
-    ensemble_test_accuracy <- ensemble_result_df %>% pull(model_win) %>% mean()
-    # View()
-    # tabyl(model_win , pred_)
+    ensemble_results_df <- pred_outcomes(ensemble_predictions_test , ensemble_ = T , outcome_ = outcome_ , outcome_type = outcome_type_)
+    ensemble_test_accuracy <- ensemble_results_df %>% pull(model_win) %>% mean()
+
     print(paste("Accuracy predicting" , outcome_ , "using ensemble of" , model_runs_ ,  method__ , "model run(s) is" , ensemble_test_accuracy))
     result_list[["ensemble_threshold"]] <- ifelse(exists("best_thresh") , best_thresh , NA)
-    result_list[["ensemble_predictions"]] <-  ensemble_predictions
+    result_list[["ensemble_predictions"]] <-  ensemble_predictions_test
     result_list[["ensemble_result_df"]] <- ensemble_result_df
     result_list[["ensemble_test_accuracy"]] <- ifelse(exists("ensemble_test_accuracy") , ensemble_test_accuracy , NA)
     result_list[["thesholds"]] <- ifelse(exists("threshold_mean_model_wins") , threshold_mean_model_wins , NA)
     model_info[["ensemble_threshold"]] <- ifelse(exists("best_thresh") , best_thresh , NA)
     model_info[["ensemble_test_accuracy"]] <- ifelse(exists("ensemble_test_accuracy") , ensemble_test_accuracy , NA)
 
-
   }
+    # View()
+    # tabyl(model_win , pred_)
+
   result_list[["model_info"]] <- model_info
-
-  log_model_run <- function(model_run_ ,
-                            con_ = NULL ,
-                            table_ = "model_runs_v1"){
-    if(is.null(con_)){
-      con_ <- dbConnect(RSQLite::SQLite() , "data/model_runs_db.db")
-    }
-    dbWriteTable(con_ , table_ , model_run_$model_info , append = T)
-    dbDisconnect(con_)
-    print(paste("Model run logged in table " , table_))
-  }
   if(log_model_run_ == T){
     log_model_run(result_list)
   }
@@ -182,16 +182,20 @@ run_NFL_model <- function(outcome_ = "result" ,
 
 model_run <- run_NFL_model("home_cover" ,
                           clusters_ = 10 ,
-                          model_runs_ =  150 ,
-                          outcome_type = "cat" ,
+                          model_runs_ =  1 ,
+                          outcome_type_ = "cat" ,
                           method__ = "xgbTree" ,
                           test_season = 2023 ,
-                          ensemble = T)
+                          resample__  = 5 ,
+                          repeats__  = 5 ,
+                          ensemble = T ,
+                          formula__ = "simple" ,
+                          log_model_run_ = T)
 
 
 
 # model_run_log1 <- enframe(test_run) %>% pivot_wider()
-# test_run2 <- run_NFL_model("home_cover" , model_runs_ =  5 , outcome_type = "cat" , method__ = "glm" , test_season = 2023 , ensemble = T)
+# test_run2 <- run_NFL_model("home_cover" , model_runs_ =  5 , outcome_type_ = "cat" , method__ = "glm" , test_season = 2023 , ensemble = T)
 # model_run_log2 <- enframe(test_run2) %>% pivot_wider()
 # data_base <- model_run_log1 %>% bind_rows(model_run_log2)
 
