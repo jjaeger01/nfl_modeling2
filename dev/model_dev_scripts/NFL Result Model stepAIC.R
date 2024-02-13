@@ -1,25 +1,17 @@
-# modeldata <- create_modeldata("result")
-model_formula <- build_formula("result")
-
-# modeldata <- create_modeldata("home_win")
-# model_formula <- build_formula("home_win")
+modeldata <- create_modeldata("result")
 
 indices <- sample(1:nrow(modeldata), size = 0.75 * nrow(modeldata))
 train <- modeldata %>% na.omit() %>% dplyr::slice(indices)
 test <- modeldata %>% na.omit() %>% dplyr::slice(-indices)
 
-nfl_model <- lm(data = train , model_formula)
-# nfl_model <- glm(data = train[-1] , model_formula)
-# randomForest::randomForest(data = train[-1] , home_win ~ .)
-# nfl_model <- train %>%
-#   mutate(home_win = as.factor(home_win)) %>%
-#   select(-1) %>%
-#   randomForest::randomForest(data = . , home_win ~ . , type = "classification")
-# nfl_model$confusion
-# nfl_model$importance
+# train.int <- data.frame(model.matrix( ~ .^2 , train[-1]))[-1]
 
-# nfl_model <- MASS::stepAIC(nfl_model)
-# summary(nfl_model)
+# nfl_model <- lm(data = train.int , result ~ .)
+nfl_model <- lm(data = train[-1] , result ~ .^2)
+nfl_model <- MASS::stepAIC(nfl_model)
+summary(nfl_model)
+
+save(nfl_model , "stepAIC_result_model_v1.r")
 
 outcomes %>%
   filter(game_id %in% test$game_id) %>%
@@ -32,7 +24,7 @@ outcomes %>%
          model_win = ifelse(pred_cover ==   home_cover  , 1 , 0)
   )  %>%
   select(game_id , spread_line , pred , pred_linedif , result , linedif , model_win) %>%
-tabyl(model_win)
+  tabyl(model_win)
 
 # outcomes %>%
 #   filter(game_id %in% test$game_id) %>%

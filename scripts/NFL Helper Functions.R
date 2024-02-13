@@ -3,12 +3,12 @@
 # Create modeling dataset, contains previous-average variables , ATS and wins, user specified outcome, defaults to result
 create_modeldata <- function(outcome_ = "result" , drop_cols_ = T){
   modeldata <- alldata %>%
-    select("game_id" , all_of(outcome_) ,
+    dplyr::select("game_id" , all_of(outcome_) ,
            "div_game" , "spread_line" ,
            contains("prev")
            ) %>%
     rename_with(~str_replace(.,".prev_avg" , ".avg") , contains(".prev_avg"))
-  modeldata %>% filter(!is.na(outcome_[1])) %>% select(all_of(outcome_)) %>% unique()
+  modeldata %>% filter(!is.na(outcome_[1])) %>% dplyr::select(all_of(outcome_)) %>% unique()
   if(drop_cols_ == T){
     drop_cols <- c("prev_wins" , "prev_wins.away" ,  "prev_points" , "prev_points.away" ,
                    "prev_cover" , "prev_cover.away" , "prev_game" , "prev_game.away"  ,
@@ -17,7 +17,7 @@ create_modeldata <- function(outcome_ = "result" , drop_cols_ = T){
                    "prev_home_fav_cover" , "prev_away_fav_cover" , "prev_home_dog_cover" , "prev_away_dog_cover" ,
                    "prev_home_cover.away" , "prev_away_cover.away" , "prev_home_fav_cover.away" , "prev_away_fav_cover.away" ,
                    "prev_home_dog_cover.away" , "prev_away_dog_cover.away" )
-    modeldata <- modeldata %>% select(-drop_cols)
+    modeldata <- modeldata %>% dplyr::select(-drop_cols)
   }
   return(modeldata)
 }
@@ -26,16 +26,20 @@ create_modeldata <- function(outcome_ = "result" , drop_cols_ = T){
 build_current_week <- function(season_ , week_ , outcome_ = "result"){
   pull_season <- ifelse(week_ == 1 , season_ - 1 , season_)
   pull_week_ <- ifelse(week_ == 1 , ifelse(season_ > 2020 , 18  , 17), week_ - 1)
+  outcome__ <- outcome_
+  if(outcome_ == "home_away_score"){
+    outcome__ <-  c("home_score" , "away_score")
+  }
   current_week <- alldata %>%
-    select("season", "week" , "game_id" , "home_team" , "away_team" , outcome_ , "div_game" ,  "spread_line" ,) %>%
+    dplyr::select("season", "week" , "game_id" , "home_team" , "away_team" , outcome__ , "div_game" ,  "spread_line" ,) %>%
     mutate(pull_week = pull_week_) %>%
     filter(season == season_ , week == week_) %>%
     left_join(team_agg %>% filter(season == pull_season , week == pull_week_) %>%
-                select("game_id" , contains("post") , starts_with("prev_"))  ,
+                dplyr::select("game_id" , contains("post") , starts_with("prev_"))  ,
               by = join_by(home_team == posteam) , suffix = c("" , ".y")) %>%
-    select(-ends_with(".y")) %>%
+    dplyr::select(-ends_with(".y")) %>%
     left_join(team_agg %>% filter(season == pull_season , week == pull_week_) %>%
-                select("game_id" , contains("post") , starts_with("prev_"))  ,
+                dplyr::select("game_id" , contains("post") , starts_with("prev_"))  ,
               by = join_by(away_team == posteam) , suffix = c("" , ".away")) %>%
     rename_with(~ str_remove(., "post_"), everything())
   return(current_week)
@@ -103,35 +107,45 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
                           outcome_ = "result" ,
                           outcome_type = "cont" ,
                           fit_ ,
-                          ensemble_ = F){
+                          home_fit_ = NA ,
+                          away_fit_ = NA ,
+                          ensemble_ = F ,
+                          ensemble_threshold = 0.5){
   if(outcome_type == "cont" & ensemble_ == F){
     test_outcomes <- game_outcomes(test) %>%
       mutate(pred = predict(fit_ , test))
   }
   if(outcome_type == "cat" & ensemble_ == F){
     test_outcomes <- game_outcomes(test) %>%
-      mutate(pred = as.numeric(as.character(predict(fit_ , test))))
+      mutate(raw_pred = predict(fit_ , test[-1]) ,
+ #            pred_prob = predict(fit_ , test[-1] , type = "prob") ,
+             pred = as.numeric(as.character(predict(fit_ , test[-1] )))
+             )
   }
   if(ensemble_ == T){
     if(outcome_type == "cat"){
       test_outcomes <- game_outcomes(test) %>%
         mutate(linedif = spread_line + result ,
-               avg_pred = rowMeans(test %>% select(matches("pred"))) ,
-               pred = ifelse(avg_pred >  best_thresh , 1 , 0) ,
+               avg_pred = rowMeans(test %>% dplyr::select(matches("pred"))) ,
+               pred = ifelse(avg_pred >  ensemble_threshold , 1 , 0) ,
                # does_count = ifelse(avg_pred > 0.8 , T , F) ,
         )
     }
     if(outcome_type == "cont"){
       test_outcomes <- game_outcomes(test) %>%
         mutate(linedif = spread_line + result ,
-               pred = rowMeans(test %>% select(matches("pred"))) ,
+               pred = rowMeans(test %>% dplyr::select(matches("pred"))) ,
         )
     }
   }
   if(outcome_ == "result"){
     test_outcomes <- test_outcomes %>% mutate(
+      pred_home_score = NA ,
+      pred_away_score = NA ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
+      pred_cat_ = pred_cover ,
+      outcome_ = home_cover ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
       model_win_ns = ifelse(pred_win == home_win , 1 , 0)
@@ -139,8 +153,12 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
   }
   if(outcome_ == "linedif"){
     test_outcomes <- test_outcomes %>% mutate(
+      pred_home_score = NA ,
+      pred_away_score = NA ,
       pred_linedif = pred  ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
+      pred_cat_ = pred_cover ,
+      outcome_ = home_cover ,
       pred_win = ifelse((pred - spread_line) > 0 , 1 , 0) ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
       model_win_ns = ifelse(pred_win == home_win , 1 , 0)
@@ -148,8 +166,12 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
   }
   if(outcome_ == "spread_line"){
     test_outcomes <- test_outcomes %>% mutate(
+      pred_home_score = NA ,
+      pred_away_score = NA ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
+      pred_cat_ = pred_cover ,
+      outcome_ = home_cover ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
       model_win_ns = ifelse(pred_win == home_win , 1 , 0)
@@ -157,11 +179,13 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
   }
   if(outcome_ == "home_away_score"){
     test_outcomes <- test_outcomes %>% mutate(
-      pred_home_score = predict(fit_ , test) ,
-      pred_away_score = predict(fit_ , test) ,
+      pred_home_score = predict(home_fit_ , test) ,
+      pred_away_score = predict(away_fit_ , test) ,
       pred = pred_home_score - pred_away_score ,
       pred_linedif = pred + spread_line ,
       pred_cover = ifelse(pred_linedif > 0 , 1 , 0) ,
+      pred_cat_ = pred_cover ,
+      outcome_ = home_cover ,
       pred_win = ifelse(pred > 0 , 1 , 0) ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
       model_win_ns = ifelse(pred_win == home_win , 1 , 0)
@@ -169,15 +193,29 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
   }
   if(outcome_ == "home_cover"){
     test_outcomes <- test_outcomes %>% mutate(
+      pred_home_score = NA ,
+      pred_away_score = NA ,
       pred_cover = pred ,
+      pred_cat_ = pred_cover ,
+      outcome_ = home_cover ,
+      pred_win = NA ,
       model_win = ifelse(pred_cover ==   home_cover  , 1 , 0) ,
+      model_win_ns = NA ,
+      outcome_ = home_cover
     )
   }
   if(outcome_ == "home_win"){
     test_outcomes <- test_outcomes %>% mutate(
+      pred_home_score = NA ,
+      pred_away_score = NA ,
       pred_win = pred ,
+      pred_cat_ = pred_win ,
+      outcome_ = home_win ,
+      pred_cover = NA ,
       model_win = ifelse(pred_win ==   home_win  , 1 , 0) ,
-    )
+      model_win_ns = ifelse(pred_win ==   home_win  , 1 , 0) ,
+      outcome_ = home_win
+      )
   }
   return(test_outcomes)
 }
@@ -185,7 +223,7 @@ pred_outcomes <- function(test , # Generate predictions for a test dataset. User
 
 log_model_run <- function(model_run_ ,
                           con_ = NULL ,
-                          table_ = "model_runs_v1"){
+                          table_ = "model_runs_v2"){
   library(DBI)
   if(is.null(con_)){
     con_ <- dbConnect(RSQLite::SQLite() , "data/model_runs_db.db")

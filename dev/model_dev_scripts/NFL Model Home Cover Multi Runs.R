@@ -12,8 +12,8 @@ for(i in 1:15){
   # train_ <- modeldata %>% na.omit() %>% dplyr::slice(indices)
   # test <- modeldata %>% na.omit() %>% dplyr::slice(-indices)
 
-  train_ <- modeldata %>% na.omit() %>% filter(substr(game_id , 1 , 4) < 2023)
-  test_ <- modeldata %>% na.omit() %>% filter(substr(game_id , 1 , 4) >= 2023)
+  train_ <- modeldata %>% na.omit() %>% filter(substr(game_id , 1 , 4) < 2022)
+  test_ <- modeldata %>% na.omit() %>% filter(substr(game_id , 1 , 4) >= 2022)
 
   home_cover_fit <- model_outcome(outcome_ = "home_cover" ,
                                   method_ = "xgbTree" ,
@@ -44,7 +44,7 @@ psych::describe(accuracies)
 #   accuracies_w_l <- c(accuracies_w_l , mean(outlist[[i]]$results_df$model_win_ns))
 # }
 
-predictions <- tibble(outlist[[1]]$results_df %>% select(game_id , result , spread_line))
+predictions <- tibble(outlist[[3]]$results_df %>% select(game_id , result , spread_line))
 for(i in 1:15){
   pred <- outlist[[i]]$results_df %>% select(game_id , pred)
   predictions <- predictions %>% left_join(pred , by = "game_id" , suffix = c("",i))
@@ -71,7 +71,7 @@ i <- i + 0.01
 predictions %>% game_outcomes() %>%
   mutate(linedif = spread_line + result ,
          avg_pred = rowMeans(predictions %>% select(matches("pred"))) ,
-         pred_ = ifelse(avg_pred > 0.8 , 1 , 0) ,
+         pred_ = ifelse(avg_pred > .8 , 1 , 0) ,
          does_count = ifelse(avg_pred > 0.8 , T , F) ,
          model_win = ifelse(pred_ == home_cover , 1 , 0)
   )  %>% pull(model_win) %>% mean()
