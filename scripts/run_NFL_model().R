@@ -6,20 +6,20 @@ if(!exists("pbp")){
 
 # outcome_ = "home_away_score"
 # clusters_ = 10
-# model_runs_ =  1
+# model_runs_ =  5
 # outcome_type_ = "cont"
 # method__ = "lm"
 # test_season = 2023
 # resample__  = 5
 # repeats__  = 5
-# ensemble = F
+# ensemble = T
 # formula__ = "simple"
 # log_model_run_ = F
 # resample_method_ = "repeatedcv"
 # pre_process_ = NA
 # avg_vars_ = "full"
 
-run_NFL_model <- function(outcome_ = "home_away_score" ,
+run_NFL_model <- function(outcome_ = "result" ,
                           model_runs_ = 10 ,
                           outcome_type_ = "cont" ,
                           method__  = "lm",
@@ -47,7 +47,7 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
 
   # Model run loop ####
   start_time <- Sys.time()
-  cat(paste("Running models, starting at" , start_time , "\n" , "Method:" , method__ , "\n" ,"Season:" , test_season , "\n" , "Number of runs:" , model_runs_ , "\n\n"))
+  cat(paste("Running models, starting at" , start_time , "\n" , "Outcome:" , outcome_ , "\n" ,  "Method:" , method__ , "\n" ,"Season:" , test_season , "\n" , "Number of runs:" , model_runs_ , "\n\n"))
   for(i in 1:model_runs_){
     print(paste("Model Run:" , i , sep = ""))
 
@@ -118,7 +118,7 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
     accuracy <- mean(results_df$model_win)
     accuracy_ns <- mean(results_df$model_win_ns)
 
-    out <- list(model = fit_, results_df = results_df , accuracy = accuracy , accuracy_ns = accuracy_ns)
+    out <- list(model = fit_, results_df = results_df , accuracy = accuracy , accuracy_ns = accuracy_ns , home_fit_ = home_fit , away_fit_ = away_fit)
     outlist[[i]] <-  out
   }
   stop_time <- Sys.time()
@@ -169,7 +169,7 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
 
   # Generate ensemble predictions ####
   if(ensemble == T){ ## Extract predictions from each model run,  compile into one dataframe ####
-    ensemble_predictions <- tibble(train__ %>% game_outcomes() %>% dplyr::select(game_id , result , spread_line , outcome_))
+    ensemble_predictions <- tibble(train__ %>% game_outcomes() %>% dplyr::select(game_id , result , spread_line , outcome__))
     for(i in 1:model_runs_){
       pred <- ensemble_predictions %>% mutate(pred = as.numeric(as.character(predict(outlist[[i]]$model , train__)))) %>% dplyr::select(game_id , pred)
       ensemble_predictions <- ensemble_predictions %>% left_join(pred , by = "game_id" , suffix = c("",i))
@@ -203,7 +203,7 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
       print(paste("Optimal threshold for ensemble prediction is " , best_thresh))
     }
     ## Apply models to test data using pred_outcomes() ####
-    ensemble_predictions_test <- tibble(test_ %>% game_outcomes() %>% dplyr::select(game_id , result , spread_line , outcome_))
+    ensemble_predictions_test <- tibble(test_ %>% pred_week_base())
     for(i in 1:model_runs_){
       pred <- test_ %>% mutate(pred = as.numeric(as.character(predict(outlist[[i]]$model , test_)))) %>% dplyr::select(game_id , pred)
       ensemble_predictions_test <- ensemble_predictions_test %>% left_join(pred , by = "game_id" , suffix = c("",i))
@@ -213,7 +213,8 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
                                          ensemble_ = T ,
                                          outcome_ = outcome_ ,
                                          outcome_type = outcome_type_ ,
-                                         ensemble_threshold = best_thresh)
+                                         ensemble_threshold = best_thresh ,
+                                         make_predictions = F)
     ensemble_test_accuracy <- ensemble_results_df %>% pull(model_win) %>% mean()
     print(paste("Accuracy predicting" , outcome_ , "using ensemble of" , model_runs_ ,  method__ , "model run(s) is" , ensemble_test_accuracy))
     ensemble_confusion_matrix <- confusionMatrix(factor(ensemble_results_df$pred_cover) , factor(ensemble_results_df$home_cover) , positive = "1")
@@ -261,17 +262,17 @@ run_NFL_model <- function(outcome_ = "home_away_score" ,
 }
 
 
-# model_run <- run_NFL_model("home_win" ,
-#                           clusters_ = 10 ,
-#                           model_runs_ =  1 ,
-#                           outcome_type_ = "cat" ,
-#                           method__ = "glm" ,
-#                           test_season = 2023,
-#                           resample__  = 5 ,
-#                           repeats__  = 5 ,
-#                           ensemble = F,
-#                           formula__ = "simple" ,
-#                           log_model_run_ = F)
+model_run <- run_NFL_model("home_away_score" ,
+                          clusters_ = 10 ,
+                          model_runs_ =  5 ,
+                          outcome_type_ = "cont" ,
+                          method__ = "glmboost" ,
+                          test_season = 2023,
+                          resample__  = 5 ,
+                          repeats__  = 5 ,
+                          ensemble = T,
+                          formula__ = "simple" ,
+                          log_model_run_ = F)
 
 # confusionMatrix(model_run$test_result_df$raw_pred , factor(model_run$test_result_df[[model_run$model_info$outcome]]) , positive = "1")
 

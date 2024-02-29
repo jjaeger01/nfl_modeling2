@@ -1,50 +1,103 @@
-source("~/Projects/nfl_modeling2/scripts/run_NFL_model().R")
-pred_week <- function(season_ ,
-                      week_ ,
-                      outcome__ ,
-                      outcome_type_ ,
-                      method_  ,
-                      ensemble_ ){
+pred_week <- function(outcome__ = "result"  ,
+                      outcome_type__ = "cont"  ,
+                      model_runs__ = 1  ,
+                      method___ = "lm"  ,
+                      test_season_ = 2023  ,
+                      pred_season_ = 2023  ,
+                      week__ = 10 ,
+                      ensemble_ = F ,
+                      log_model_run__ = F ,
+                      eval_pred_ = T ,
+                      log_prediction_ = T){
 
-  prediction_model <- run_NFL_model(outcome__ ,
-                                    model_runs_ = 1 ,
-                                    outcome_type_ = outcome_type_ ,
-                                    method__  = method_,
-                                    resample_method_ = "repeatedcv",
-                                    resample__  = 5 ,
-                                    repeats__  = 5 ,
-                                    clusters_ = 10 ,
-                                    test_season = season_ ,
-                                    ensemble = F ,
-                                    formula__ = "simple" ,
-                                    log_model_run_ = F ,
-                                    pre_process_ = NA ,
-                                    avg_vars_ = "full")
+  trained_model <- run_NFL_model(
+    outcome_ = outcome__ ,
+    outcome_type_ = outcome_type__ ,
+    model_runs_ = model_runs__ ,
+    method__ = method___ ,
+    test_season = test_season_ ,
+    ensemble = ensemble_ ,
+    log_model_run_ = log_model_run__)
 
+  if(outcome__ == "home_away_score"){
+    home_fit <- trained_model$model_objects[[1]]$home_fit_
+    away_fit <- trained_model$model_objects[[1]]$away_fit_
+  }
 
+  pred_week <- pull_pred_week(season_ = pred_season_ ,
+                              week_ = week__ ,
+                              outcome_ = outcome__)
 
-  pred_week <- build_current_week(season_ , week_ , outcome_ = outcome__)
-  print(outcome__)
-  out_ <- pred_outcomes(pred_week ,
-                outcome_ = outcome__ ,
-                outcome_type =  outcome_type_ ,
-                fit_ = prediction_model$model_objects[[1]]$model) %>%
-    mutate(method = method_ ,
-           ensemble = ensemble_ ,
-           outcome = as.character(outcome__)) %>%
-    select(game_id , season , week , home_team , away_team ,
-           home_score , away_score , result ,
-           spread_line , linedif , home_cover ,
-           pred , pred_cover , pred_win , pred_home_score , pred_away_score ,
-           model_win ,
-           outcome , method , ensemble)
+  # predict(trained_model$model_objects[[1]]$model , pred_week , type = "prob")
+
+  predictions_df <- pred_outcomes(pred_week ,
+                                  outcome_ = outcome__ ,
+                                  outcome_type = outcome_type__ ,
+                                  fit_ = trained_model$model_objects[[1]]$model ,
+                                  eval_pred = F)
+  if(outcome__ == "home_away_score"){
+    predictions_df <- pred_outcomes(pred_week ,
+                                    outcome_ = outcome__ ,
+                                    outcome_type = outcome_type__ ,
+                                    home_fit_ = home_fit ,
+                                    away_fit_ = away_fit ,
+                                    eval_pred = F)
+  }
+  if(log_prediction_ == T){
+    log_prediction(predictions_df_ = predictions_df ,
+                   table_ = "predictions_v0")
+  }
+
+  out_ <- predictions_df
+
+  if(eval_pred_ == T){
+    predictions_results_df <-  pred_outcomes(predictions_df ,
+                                             fit_ = NULL ,
+                                             outcome_ = outcome__ ,
+                                             outcome_type = outcome_type__ ,
+                                             eval_pred = eval_pred_ ,
+                                             make_predictions = F)
+    out_ <- predictions_results_df
+  }
   return(out_)
 }
 
-for(model_ in c("glm" , "glmnet" , "rf" , "xgbTree" , "glmboost" , "LogitBoost")){
-  print(pred_week(2023,22, "home_cover" , "cat" , model_ , ensemble_ = F))
-}
+# pred_week(outcome__ = "home_cover" ,
+#           outcome_type__ = "cat" ,
+#           model_runs__ = 5 ,
+#           method___ = "glm" ,
+#           test_season_ = 2022 ,
+#           pred_season_ = 2023 ,
+#           week__ = 10 ,
+#           log_model_run__ = T ,
+#           log_prediction_ = T ,
+#           ensemble_ = T) %>% pull(model_win)  %>% mean()
+#
+#
+# pred_week(outcome__ = "home_away_score" ,
+#           outcome_type__ = "cont" ,
+#           model_runs__ = 5 ,
+#           method___ = "lm" ,
+#           test_season_ = 2022 ,
+#           pred_season_ = 2023 ,
+#           week__ = 10 ,
+#           log_model_run__ = T ,
+#           log_prediction_ = T ,
+#           ensemble_ = T) %>% pull(model_win)  %>% mean()
 
-for(model_ in c("lm" , "glmnet" , "rf" , "xgbTree" , "glmboost")){
-  print(pred_week(2023,22, "result" , "cont" , model_ , ensemble_ = F))
-}
+outcome__ = "home_away_score"
+outcome_type__ = "cont"
+model_runs__ = 1
+method___ = "lm"
+test_season_ = 2022
+pred_season_ = 2023
+week__ = 10
+log_model_run__ = T
+log_prediction_ = T
+ensemble_ = F
+
+
+
+
+
+
