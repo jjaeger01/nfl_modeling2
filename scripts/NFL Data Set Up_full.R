@@ -18,17 +18,34 @@ library(caret)
 options(scipen = 9999)
 set.seed(666)
 
+print("Loading NFL Helper Functions")
+source("~/Projects/nfl_modeling2/Scripts/NFL Functions.R")
+
 # IMPORT GAMEDATA #####
+
+first_season_ <- 1999
+current_season_ <- 2023
 
 # Import Game Data
 gamesfull <- readRDS(url("http://www.habitatring.com/games.rds"))
 games <- gamesfull %>%
-  filter(season>=2010 ) %>%
+  filter(season >= first_season_ ) %>%
   mutate(spread_line = spread_line * -1) %>%
   select(game_id , season , game_type , week ,
          gameday , away_team , home_team , away_score , home_score , result , total ,
          spread_line , total_line , home_moneyline , away_moneyline ,
-         div_game , roof, surface , temp, wind)
+         div_game , roof, surface , temp, wind) %>%
+         mutate(spread_quint =  cut(spread_line ,
+                                     quantile(spread_line , probs = seq(0 , 1 , .20) , na.rm = T) ,
+                                     include.lowest = T ,
+                                     labels = c(1:5) ,
+                                     ordered_result = T) ,
+                spread_quart =  cut(spread_line ,
+                                    quantile(spread_line , probs = seq(0 , 1 , .25) , na.rm = T) ,
+                                    include.lowest = T ,
+                                    labels = c(1:4) ,
+                                    ordered_result = T) , )
+
 
 ## Relabel teams that have moved #####
 games$home_team[games$home_team=="STL"]<-"LA"
@@ -39,24 +56,8 @@ games$away_team[games$away_team=="OAK"]<-"LV"
 games$away_team[games$away_team=="SD"]<-"LAC"
 # IMPORT PBP DATA ###################################################
 
-## Scrape play by play data for desired seasons #####
 
-update_pbp <- function(update = FALSE , current_season){
-  pbp_date <- date(file.info("data-raw/pbp.rdata")$mtime)
-  print(paste("Play-by-play data last updated on" , file.info("data-raw/pbp.rdata")$mtime))
-  if(pbp_date > max(games$gameday[!is.na(games$result)]) & update == FALSE){
-    print("LOADING PBP DATA FROM LOCAL")
-    load("data-raw/pbp.rdata")
-  } else {
-    print("UPDATING PLAY-BY-PLAY DATA")
-    pbp <- load_pbp(2010:current_season)
-    save(games, file = "data-raw/games.rdata")
-    save(pbp, file = "data-raw/pbp.rdata")
-  }
-  # pbp <- ifelse(update == T , load_pbp(2000:current_season) , pbp)
-  return(pbp)
-}
-pbp <- update_pbp(current_season = 2023) ## Update season  ####
+pbp <- update_pbp(first_season = first_season_ , current_season = current_season_ ) ## Update season  ####
 
 
 pbp$pen_yds <- ifelse((pbp$penalty == 1) & pbp$posteam == pbp$penalty_team, ifelse(!is.na(pbp$penalty_yards), pbp$penalty_yards, 0), 0)
@@ -98,6 +99,7 @@ agg_off <- pbp %>%
             rush_epa_play = mean(rush_epa , na.rm = T) ,
             epa_play = mean(epa , na.rm = T) ,
   ) %>% filter(!is.na(posteam))
+offense <- colnames(agg_off)
 ### Defense ####
 agg_def <- pbp %>%
   group_by(season , defteam , game_id) %>%
@@ -114,6 +116,7 @@ agg_def <- pbp %>%
             def_pass_epa = mean(epa[play_type_nfl == "PASS"] , na.rm = T)*-1 ,
             def_rush_epa = mean(epa[play_type_nfl == "RUSH"] , na.rm = T)*-1
   ) %>% filter(!is.na(defteam))
+defense <- colnames(agg_def)
 ### Down %s ####
 agg_downs <- pbp %>%
   group_by(season, posteam, game_id , down) %>%
@@ -121,11 +124,13 @@ agg_downs <- pbp %>%
   group_by(season, posteam, game_id) %>%
   summarize_at(c("first_1" , "first_2" , "first_3" ,"first_4") , sum, na.rm = T) %>%
   filter(!is.na(posteam))
+first_down_rates <- colnames(agg_downs)
 ### Penalty Yds ####
 pen_yds <- pbp %>%
   group_by(season, posteam, game_id) %>%
   summarise(pen_yds = sum(penalty_yards , na.rm = TRUE)) %>%
   filter(!is.na(posteam))
+penalties <- colnames(pen_yds)
 ### Combine into team_agg base ####
 team_agg_base <-  left_join(agg_off, pen_yds) %>%
   left_join(agg_downs) %>%
@@ -159,9 +164,13 @@ team_agg <- team_agg_base %>%
          away_dog = ifelse(home_away == "away" & team_spread > 0 , 1 , 0) ,
          away_fav = ifelse(home_away == "away" & team_spread < 0 , 1 , 0) ,
          win = ifelse(team_result > 0 , 1 , 0) ,
+         loss = ifelse(team_result < 0 , 1 , 0) ,
+         tie = ifelse(team_result == 0 , 1 , 0) ,
          points = ifelse(home_away == "home" , home_score , away_score) ,
          linedif = team_spread + team_result ,
          ats_cover = ifelse(linedif > 0 , 1 , 0) ,
+         ats_loss = ifelse(linedif < 0 , 1 , 0) ,
+         ats_push = ifelse(linedif == 0 , 1 , 0) ,
          home_win = ifelse(home_away == "home" & win == 1 , 1 , 0) ,
          home_cover = ifelse(home_away == "home" & ats_cover == 1 , 1 , 0)  ,
          home_push = ifelse(home_away == "home" &  linedif == 0 , 1 , 0) ,
@@ -177,6 +186,16 @@ team_agg <- team_agg_base %>%
   ) %>%
   group_by(posteam, season) %>%
   mutate(total_points = cumsum(points) ,
+         home_games_played = cumsum(ifelse(home_away == "home" , 1 , 0)) - 1,
+         away_games_played = cumsum(ifelse(home_away == "away" , 1 , 0)) - 1 ,
+         prev_times_home_fav = ifelse(is.na(home_fav), sum(home_fav, na.rm = TRUE),
+                                      ifelse(home_fav ==1, cumsum(home_fav) - 1, cumsum(home_fav))) ,
+         prev_times_away_fav = ifelse(is.na(away_fav), sum(away_fav, na.rm = TRUE),
+                                      ifelse(away_fav ==1, cumsum(away_fav) - 1, cumsum(away_fav))) ,
+         prev_times_home_dog = ifelse(is.na(home_dog), sum(home_dog, na.rm = TRUE),
+                                      ifelse(home_dog ==1, cumsum(home_dog) - 1, cumsum(home_dog))) ,
+         prev_times_away_dog = ifelse(is.na(away_dog), sum(away_dog, na.rm = TRUE),
+                                      ifelse(away_dog ==1, cumsum(away_dog) - 1, cumsum(away_dog))) ,
          new_avg.points = total_points/row_number() ,
          prev_points = total_points - points ,
          prev_game = row_number() - 1 ,
@@ -208,24 +227,25 @@ team_agg <- team_agg_base %>%
 ## Join aggregated home and away player-game data with information about games #####
 alldata <- games %>%
   left_join(team_agg , by = join_by(game_id  , season , home_team == posteam) , suffix = c("" , ".y")) %>% select(-ends_with(".y")) %>%
-  left_join(team_agg , by = join_by(game_id  , season , away_team == posteam) , suffix = c("" , ".away")) # %>%
+  left_join(team_agg , by = join_by(game_id  , season , away_team == posteam) , suffix = c("" , "_away")) # %>%
   # select(any_of(colnames(games)) ,
   #        contains("avg") ,
   #        contains("prev")
   #        )
 outcomes <- games %>%
-  select(game_id , season , week , home_team , away_team , home_score , away_score , result , spread_line) %>%
+  select(game_id , season , week , home_team , away_team , home_score , away_score , result , spread_line ) %>%
   mutate(linedif = result + spread_line ,
          home_win = ifelse(result > 0  , 1 , 0) ,
          home_cover = ifelse(linedif > 0 , 1 , 0)
          )
 save(games, file = "data/alldata.rdata")
 save(games, file = "data/games.rdata")
-print("Loading NFL Helper Functions")
-source("~/Projects/nfl_modeling2/scripts/NFL Helper Functions.R")
 
-# RESULT model pre-processing
-modeldata <- create_modeldata("result") %>% na.omit()
+
+# source("~/Projects/nfl_modeling2/scripts/NFL Helper Functions.R")
+#
+# # RESULT model pre-processing
+# modeldata <- create_modeldata("result") %>% na.omit()
 
 # Find correlated predictors
 
