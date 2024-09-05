@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 `{r , include=FALSE , message=F} library(tidyverse) # library(tidylog) library(DBI) library(RSQLite) source("~/Projects/nfl_modeling2/scripts/NFL Functions.R", echo=F) source("~/Projects/nfl_modeling2/scripts/NFL Data Set Up_full.R", echo=F)`
 
 \`\`\`{r , eval = F , include=FALSE , message=F} \# STANDARD BASE
@@ -199,3 +200,6 @@ y = “ATS Accuracy” , title = “Overall Model Accuracy”) +
 theme(axis.text.x = element_text(angle = 45, hjust=1)) \`\`\`
 
 \`\`\`
+=======
+
+>>>>>>> efb521d7312251c766b42c77a7950b104b6e45cb
