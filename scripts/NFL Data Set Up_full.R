@@ -24,14 +24,14 @@ source("~/Projects/nfl_modeling2/Scripts/NFL Functions.R")
 # IMPORT GAMEDATA #####
 
 first_season_ <- 1999
-current_season_ <- 2023
+current_season_ <- 2024
 
 # Import Game Data
 gamesfull <- readRDS(url("http://www.habitatring.com/games.rds"))
 games <- gamesfull %>%
   filter(season >= first_season_ ) %>%
   mutate(spread_line = spread_line * -1) %>%
-  select(game_id , season , game_type , week ,
+  select(game_id , season , game_type , week , gametime ,
          gameday , away_team , home_team , away_score , home_score , result , total ,
          spread_line , total_line , home_moneyline , away_moneyline ,
          div_game , roof, surface , temp, wind) %>%
@@ -62,7 +62,8 @@ pbp <- update_pbp(first_season = first_season_ , current_season = current_season
 
 pbp$pen_yds <- ifelse((pbp$penalty == 1) & pbp$posteam == pbp$penalty_team, ifelse(!is.na(pbp$penalty_yards), pbp$penalty_yards, 0), 0)
 pbp$yac <- ifelse(pbp$complete_pass == 1, ifelse(!is.na(pbp$yards_after_catch), pbp$yards_after_catch, 0), 0)
-pbp$passyds <- ifelse(pbp$play_type_nfl == "PASS", ifelse(!is.na(pbp$passing_yards), pbp$passing_yards, 0) , 0)
+# pbp$passyds <- ifelse(pbp$play_type_nfl == "PASS", ifelse(!is.na(pbp$passing_yards), pbp$passing_yards, 0) , 0)
+pbp$passyds <- ifelse(pbp$play_type_nfl == "PASS", ifelse(!is.na(pbp$yards_gained), pbp$yards_gained, 0) , 0)
 pbp$rushyds <- ifelse(pbp$play_type_nfl == "RUSH", ifelse(!is.na(pbp$rushing_yards), pbp$rushing_yards, 0) , 0)
 pbp$first_1 <- ifelse(pbp$first_down == 1 & pbp$down == 1 , 1 , 0)
 pbp$first_2 <- ifelse(pbp$first_down == 1 & pbp$down == 2 , 1 , 0)
@@ -81,11 +82,13 @@ last_season_final_weeks <- games %>%
 ### Offense ####
 agg_off <- pbp %>%
   group_by(season, posteam, game_id) %>%
-  summarise(passyds = sum(passyds , na.rm = TRUE),
+  summarise(# passyds = sum(passyds , na.rm = TRUE),
+            passyds = sum(passyds , na.rm = TRUE)  +  sum(ifelse(sack == 1 , yards_gained , 0) , na.rm = T) ,
+            # sack_yds = sum(ifelse(sack == 1 , yards_gained , 0) , na.rm = T) ,
             pass.comp = sum(complete_pass , na.rm = TRUE),
             pass.att = sum(pass_attempt, na.rm = TRUE) ,
             pass_plays = sum(pass , na.rm = T) ,
-            pass.comp.pct = (sum(complete_pass , na.rm = TRUE) / sum(pass_attempt, na.rm = TRUE) ) ,
+            pass.comp.pct = (sum(complete_pass , na.rm = TRUE) / sum(pass_attempt[sack == 0], na.rm = TRUE) ) ,
             pass.ints = sum(interception , na.rm = TRUE),
             pass.tds = sum(pass_touchdown , na.rm = TRUE),
             rushyds = sum(rushyds , na.rm = TRUE) ,
@@ -104,7 +107,7 @@ offense <- colnames(agg_off)
 agg_def <- pbp %>%
   group_by(season , defteam , game_id) %>%
   summarise(passyds.allowed = sum(passyds , na.rm = TRUE) ,
-            pass.comp.pct.allowed = (sum(complete_pass , na.rm = TRUE) / sum(pass_attempt, na.rm = TRUE) ) ,
+            pass.comp.pct.allowed = (sum(complete_pass , na.rm = TRUE) / sum(pass_attempt[sack == 0],na.rm = TRUE) ) ,
             def.pass.ints = sum(interception , na.rm = TRUE) ,
             pass.tds.allowed = sum(pass_touchdown , na.rm = TRUE) ,
             fumble.forced = sum(fumble_forced , na.rm = TRUE) ,
@@ -233,7 +236,7 @@ alldata <- games %>%
   #        contains("prev")
   #        )
 outcomes <- games %>%
-  select(game_id , season , week , home_team , away_team , home_score , away_score , result , spread_line ) %>%
+  select(game_id , season , week , home_team , away_team , home_score , away_score , result , spread_line , spread_quint) %>%
   mutate(linedif = result + spread_line ,
          home_win = ifelse(result > 0  , 1 , 0) ,
          home_cover = ifelse(linedif > 0 , 1 , 0)

@@ -1,11 +1,18 @@
 source("~/Projects/nfl_modeling2/scripts/run_NFL_model().R")
 
-preseason_prediction <- function(outcome , method , season , model_test_season){
+preseason_prediction <- function(outcome ,
+                                 method ,
+                                 season ,
+                                 model_test_season ,
+                                 model_formula = "simple" ,
+                                 log_in_table = "preseason_pred2"){
 
   trained_model <- run_NFL_model(outcome_ = outcome ,
                                  method__ = method ,
                                  test_season = model_test_season ,
-                                 formula__ = "simple")
+                                 formula__ = model_formula)
+
+  features <- trained_model$model_info$features
 
   pred_season <- pull_pred_season(season)
 
@@ -17,7 +24,11 @@ preseason_prediction <- function(outcome , method , season , model_test_season){
                                        home_fit_ = trained_model$model_objects$home_fit_ ,
                                        away_fit_ = trained_model$model_objects$away_fit_)
 
-  predicted_season <- predicted_season_ %>% eval_pred() %>% select(game_id , season , home_team , away_team , pred_win)
+  # predicted_season_ <- predicted_season_ %>% mutate(outcome = if_else(outcome == "spread_line" , "spread_line_neg" , outcome))
+
+  predicted_season <- predicted_season_ %>%
+    eval_pred() %>%
+    select(game_id , season , home_team , away_team , pred_win)
 
   PROJECTION  <-  predicted_season %>%
                     group_by(home_team) %>%
@@ -26,16 +37,22 @@ preseason_prediction <- function(outcome , method , season , model_test_season){
                       predicted_season %>%
                         group_by(away_team) %>%
                         summarise(away_wins = sum(if_else(as.numeric(as.character(pred_win)) == 0 , 1 , 0))) ,
-                      by = c("home_team" = "away_team")) %>%
+                      by = c("home_team" = "away_team")
+                    ) %>%
                     mutate(WINS = home_wins + away_wins ,
                            LOSSES = 17 - WINS ,
                            RECORD = paste(WINS , LOSSES , sep = " - ") ,
                            METHOD = method ,
-                           OUTCOME = outcome)
+                           OUTCOME = outcome ,
+                           formula = model_formula ,
+                           features = features ,
+                           run_time = as.character(Sys.time())
+                           )
 
-  PROJECTION
+  # print(PROJECTION)
+  log_preseason_prediction(PROJECTION , db_file = "data/predictions2.db" , table_ = log_in_table)
 
-  pred_season_table <- function(team_win_projection_){
+  pred_season_table <- function(team_win_projection_ , combo = F){
     afc_east <- c("BUF" , "MIA" , "NYJ" , "NE")
     afc_north <- c("PIT" , "BAL" , "CLE" , "CIN")
     afc_west <- c("DEN" , "LAC" , "LV" , "KC")
@@ -70,14 +87,19 @@ preseason_prediction <- function(outcome , method , season , model_test_season){
     }
     nfc_table <- conf_table
 
-    preseason_projection <- rbind(afc_table , nfc_table) %>% select(-c(RECORD , METHOD , OUTCOME))
+    if(combo == F){
+      preseason_projection <- rbind(afc_table , nfc_table) %>% select(-c(RECORD , METHOD , OUTCOME , formula , features , run_time))
+    } else {
+      preseason_projection <- rbind(afc_table , nfc_table)
+    }
+
+
     return(preseason_projection)
   }
-
   pred_season_table(PROJECTION)
-
 }
 
-preseason_prediction("home_win" , "bayesglm" , 2023 , 2022)
+# preseason_prediction("spread_line" , "glmboost" , 2024 , 2023)
+
 
 
