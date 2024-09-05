@@ -1,7 +1,7 @@
 if(!exists("pbp")){
   source("~/Projects/nfl_modeling2/scripts/NFL Data Set Up_full.R")
 }
-source("~/Projects/nfl_modeling2/Scripts/NFL_rfe().R")
+# source("~/Projects/nfl_modeling2/Scripts/NFL_rfe().R")
 source("~/Projects/nfl_modeling2/Scripts/NFL Functions.R")
 
 
@@ -17,16 +17,17 @@ run_NFL_model <- function(outcome_ = "result" ,
                           log_pred_in_table = "pred_table" ,
                           log_pred_db_file = NULL ,
                           resample_method_ = "repeatedcv",
-                          resample__  = 5 ,
-                          repeats__  = 5 ,
+                          resample__  = 10 ,
+                          repeats__  = 10 ,
                           clusters_ = 10 ,
                           train_seasons = NULL ,
-                          scale_ = F ,
+                          scale_ = T ,
                           avg_vars_ = "full" ,
-                          use_RFE = F ,
+                          use_RFE = T ,
                           funcs = NULL ,
                           train_data_ = NULL ,
-                          test_data_ = NULL){
+                          test_data_ = NULL ,
+                          quintile = "ALL"){
   library(caret)
   library(doParallel)
   set.seed(825)
@@ -37,15 +38,17 @@ run_NFL_model <- function(outcome_ = "result" ,
     outcome__ <-  c("home_score" , "away_score")
   }
   modeldata <- create_modeldata(c(outcome_)) %>% na.omit() # Model data created####
-
-  # Model run loop ####
+  # modeldata$spread_line_ <- modeldata$spread_line
   start_time <- Sys.time()
   cat(paste("Running models, starting at" , start_time , "\n" , "Outcome:" , outcome_ , "\n" ,  "Method:" , method__ , "\n" ,"Season:" , test_season , "\n"))
 
+  # Data split ####
+
   if(!is.null(train_seasons)){
     train__ <- modeldata %>%  filter(substr(game_id , 1 , 4) %in% train_seasons)
+  }else{
+    train__ <- modeldata %>%  filter(substr(game_id , 1 , 4) < min(test_season))
   }
-  train__ <- modeldata %>%  filter(substr(game_id , 1 , 4) < min(test_season))
   if(!is.null(train_data_)){
     train__ <- train_data_
   }
@@ -55,8 +58,12 @@ run_NFL_model <- function(outcome_ = "result" ,
   if(!is.null(test_data_)){
     test_ <- test_data_
   }
+
+  # Scale data ####
   if(scale_ == T){
-    preProcValues <- preProcess(train__ %>% select(-c("game_id" , "spread_line" , outcome__)),
+    preProcValues <- preProcess(train__ %>% select(-c("game_id" ,
+                                                      "spread_line",
+                                                      outcome__)),
                                 method = c("center", "scale")
                                 )
     train__ <- predict(preProcValues , train__)
@@ -76,7 +83,8 @@ run_NFL_model <- function(outcome_ = "result" ,
     savePredictions = T ,
     ## repeated ten times
     repeats = repeats__)
-  # Create model formula based on outcome
+
+  # Create model formula based on outcome ####
   home_fit <- NA
   away_fit <- NA
   j <- 2
@@ -101,55 +109,63 @@ run_NFL_model <- function(outcome_ = "result" ,
     if(formula__ == "custom_int"){
       source("~/Projects/nfl_modeling2/dev/build int formula.R")
       model_formula_ <- build_formula(outcome___ ,  other_cols = c(home_int , away_int) )
-      custom_formula <- formula(model_formula_)
+      custom_formula <- model_formula_
+    }
+    # print(custom_formula)
+    if(method__ == "knn"){
+      # model_formula_ <- build_formula(outcome___ , drop_cols = "div_game")
+      model_formula_ <- str_replace(model_formula_  , " div_game \\+" , "")
+      custom_formula <- model_formula_
     }
     if(!is.null(custom_formula)){
       model_formula <- formula(custom_formula)
     }
+    # Run RFE ####
+    used_RFE <- 0
     if(use_RFE == T){
       if(is.factor(train__[[outcome___]]) == F ){
-        outcome_type_ <- "cont"
-        if(is.null(funcs)){
-          rfe_funcs <- lmFuncs
-          funcs <- "lm"
+          outcome_type_ <- "cont"
+          if(is.null(funcs)){
+            rfe_funcs <- lmFuncs
+            funcs <- "lm"
+          }
+        } else{
+          outcome_type_ <- "cat"
+          if(is.null(funcs)){
+            rfe_funcs <- lrFuncs
+            funcs <- "lr"
+          }
         }
-      } else{
-        outcome_type_ <- "cat"
-        if(is.null(funcs)){
-          rfe_funcs <- lrFuncs
-          funcs <- "lr"
+        if(!is.null(funcs)){
+          if(funcs == "rf"){
+            rfe_funcs <- rfFuncs
+          }
+          if(funcs == "nb"){
+            rfe_funcs <- nbFuncs
+          }
         }
+        print(paste(paste("Running RFE using" , funcs , sep = " ") , "functions" , sep = " "))
+        rfe_ctrl <-rfeControl(functions = rfe_funcs,
+                              allowParallel = T ,
+                              method = "repeatedcv" ,
+                              verbose = F ,
+                              number = 10)
+        drop_cols <- c("game_id" , "spread_quint" , outcome___)
+        drop_ <- colnames(train__)[colnames(train__) %in% drop_cols]
+        rfe_run <- rfe(x = train__ %>% select(-c(drop_)) ,
+                       y = train__ %>% pull(outcome___) ,
+                       verbose = T ,
+                       rfeControl = rfe_ctrl ,
+                       sizes = 1:ncol(train__[-1]))
+
+
+
+        model_formula_ <- build_formula(outcome___ ,
+                                       other_cols = rfe_run$optVariables ,
+                                       full_cols = F)
+        model_formula <- formula(model_formula_)
+        used_RFE <- 1
       }
-      if(!is.null(funcs)){
-        if(funcs == "rf"){
-          rfe_funcs <- rfFuncs
-        }
-        if(funcs == "nb"){
-          rfe_funcs <- nbFuncs
-        }
-      }
-      print("Running RFE...")
-      rfe_ctrl <-rfeControl(functions = rfe_funcs,
-                            allowParallel = T ,
-                            method = "repeatedcv" ,
-                            verbose = F ,
-                            number = 10)
-      rfe_run <- rfe(x = train__[-c(1:2)] ,
-                     y = train__ %>% pull(outcome___) ,
-                     verbose = T ,
-                     rfeControl = rfe_ctrl ,
-                     sizes = 1:ncol(train__[-1]))
-
-
-
-      model_formula_ <- build_formula(outcome___ ,
-                                     other_cols = rfe_run$optVariables ,
-                                     full_cols = F)
-
-
-
-      model_formula <- formula(model_formula_)
-    }
     if(formula__ == "custom_int"){
       model_formula <- formula(str_replace_all(model_formula_ , "\\.avg\\." , ".avg:"))
     }
@@ -161,6 +177,10 @@ run_NFL_model <- function(outcome_ = "result" ,
                   data = train__[-1] ,
                   method = method__ ,
                   trControl = fitControl)
+    fit_$formula_type <- formula__
+    fit_$used_RFE <- used_RFE
+    fit_$quintile <- quintile
+    fit_$preproc <- preProcValues
     if(outcome_ == "home_away_score"){
       if(outcome___ == "home_score"){
         home_fit <- fit_
@@ -172,6 +192,9 @@ run_NFL_model <- function(outcome_ = "result" ,
     j <- j - 1
   }
   stopCluster(cl)
+
+  # Make Predictions ####
+
   # Use pred_outcome() to apply model to test dataset, generate predictions, and evaluate
   results_df.train <- eval_pred(
     make_predictions(test_data = train__ ,
@@ -189,10 +212,13 @@ run_NFL_model <- function(outcome_ = "result" ,
                      away_fit_ = away_fit)
     )
   # print(results_df)
-  accuracy <- mean(results_df$model_win)
-  accuracy_ns <- mean(results_df$model_win_ns)
-  accuracy.train <- mean(results_df.train$model_win)
-  accuracy_ns.train <- mean(results_df.train$model_win_ns)
+  pred_cover_pct <-mean(results_df$pred_cover , na.rm = T)
+  pred_cover_pct.train <-mean(results_df.train$pred_cover , na.rm = T)
+  record <- paste(sum(results_df$model_win) , nrow(results_df) - sum(results_df$model_win) , sep = "-")
+  accuracy <- mean(results_df$model_win , na.rm = T)
+  accuracy_ns <- mean(results_df$model_win_ns , na.rm = T)
+  accuracy.train <- mean(results_df.train$model_win , na.rm = T)
+  accuracy_ns.train <- mean(results_df.train$model_win_ns , na.rm = T)
 
   if(log_pred == T){
     pred_df <-     make_predictions(test_data = test_ ,
@@ -230,17 +256,25 @@ run_NFL_model <- function(outcome_ = "result" ,
                           accuracy_W_L = accuracy_ns ,
                           accuracy_ATS.train = accuracy.train ,
                           accuracy_W_L.train = accuracy_ns.train ,
+                          pred_cover_pct = pred_cover_pct ,
+                          pred_cover_pct.train = pred_cover_pct.train ,
+                          training_n = nrow(train__) ,
+                          games_predicted = nrow(results_df) ,
+                          record = record ,
                           runtime = runtime ,
                           test_season = test_season ,
                           run_date = as.character(start_time) ,
-                          used_RFE = use_RFE ,
+                          used_RFE = used_RFE ,
+                          rfe_funcs = funcs ,
                           formula = model_formula_ ,
+                          formula_type = formula__ ,
                           features = paste(colnames(NFL_model$model$trainingData[-1]) , collapse = " , ") ,
                           resample_method = resample_method_ ,
                           cv_folds = resample__ ,
                           repeats = repeats__ ,
                           scale_ = scale_ ,
-                          avg_vars_ = "full"
+                          avg_vars_ = "full" ,
+                          quintile = quintile
   )
   # print(model_info$features)
   result_list <- list(model_objects = NFL_model ,
@@ -248,9 +282,9 @@ run_NFL_model <- function(outcome_ = "result" ,
                       train_data = train__ ,
                       test_data = test_ ,
                       test_result_df = NFL_model$results_df ,
-                      results_df.train = NFL_model$results_df.train
-
-  )
+                      results_df.train = NFL_model$results_df.train ,
+                      model_scaling = preProcValues
+                      )
   model_metric_result_df <- results_df
 
   # print(model_metric_result_df)
@@ -288,15 +322,32 @@ run_NFL_model <- function(outcome_ = "result" ,
   return(result_list)
 }
 
-# # Test ####
-# model_run <- run_NFL_model(outcome_ = "home_away_score" ,
-#               method__ = "xgbTree" ,
-#               use_RFE = T ,
-#               funcs = "lm" ,
-#               formula__ = "simple" ,
-#               test_season = 2023 ,
-#               scale_ = T )
+# Test run ####
+#
+# model_run <- run_NFL_model(outcome_ = "result" ,
+#                            method__ = "lm" ,
+#                            use_RFE = F ,
+#                            resample__ = 10 ,
+#                            repeats__ = 10 ,
+#                            formula__ = "simple" ,
+#                            train_seasons = 2020:2023 ,
+#                            test_season = 2023 ,
+#                            scale_ = T ,
+#                            log_model_run_ = F ,
+#                            log_db_file = "data/test_models.db" ,
+#                            log_in_table = "test5" ,
+#                            log_pred = F ,
+#                            log_pred_db_file = "data/test_preds.db" ,
+#                            log_pred_in_table = "test7")
+# #
+# model_run$test_result_df %>% tabyl(pred_cover)
+#
 
+# con_ <- dbConnect(RSQLite::SQLite() , "data/test_pred.db")
+# dbListTables(con_)
+# pred <- dbGetQuery(con_ , "select * from frig_test5") # %>% select(-features)
+# pred %>% View("model_runs")
+# #
 
 # custom_formula =  build_formula("linedif" , drop_cols = "spread_line" , other_cols = c(home_int , away_int) ))
 
