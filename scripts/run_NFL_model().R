@@ -40,7 +40,7 @@ run_NFL_model <- function(outcome_ = "result" ,
   modeldata <- create_modeldata(c(outcome_)) %>% na.omit() # Model data created####
   # modeldata$spread_line_ <- modeldata$spread_line
   start_time <- Sys.time()
-  cat(paste("Running models, starting at" , start_time , "\n" , "Outcome:" , outcome_ , "\n" ,  "Method:" , method__ , "\n" ,"Season:" , test_season , "\n"))
+  cat(paste("Running models, starting at" , start_time , "\n" , "Outcome:" , outcome_ , "\n" ,  "Method:" , method__ , "\n" ,"Season:" , paste(test_season , collapse = " , ") , "\n"))
 
   # Data split ####
 
@@ -111,14 +111,22 @@ run_NFL_model <- function(outcome_ = "result" ,
       model_formula_ <- build_formula(outcome___ ,  other_cols = c(home_int , away_int) )
       custom_formula <- model_formula_
     }
+    if(formula__ == "boruta"){
+      load("~/Projects/nfl_modeling2/data/boruta_list_20241022.r")
+      model_formula_ <- build_formula(outcome___ ,
+                                      other_cols = names(boruta_list[[outcome___]]$finalDecision[boruta_list[[outcome___]]$finalDecision == "Confirmed"]))
+      custom_formula <- model_formula_
+    }
     # print(custom_formula)
+
+    if(!is.null(custom_formula)){
+      model_formula_ <- custom_formula
+      model_formula <- formula(custom_formula)
+    }
     if(method__ == "knn"){
       # model_formula_ <- build_formula(outcome___ , drop_cols = "div_game")
       model_formula_ <- str_replace(model_formula_  , " div_game \\+" , "")
       custom_formula <- model_formula_
-    }
-    if(!is.null(custom_formula)){
-      model_formula <- formula(custom_formula)
     }
     # Run RFE ####
     used_RFE <- 0
@@ -155,7 +163,7 @@ run_NFL_model <- function(outcome_ = "result" ,
         rfe_run <- rfe(x = train__ %>% select(-c(drop_)) ,
                        y = train__ %>% pull(outcome___) ,
                        verbose = T ,
-                       rfeControl = rfe_ctrl ,
+                       rfeControl = rfe_ctrl , # CONSIDER SWITCHING TO rf FOR EVERYTHING
                        sizes = 1:ncol(train__[-1]))
 
 
@@ -201,7 +209,8 @@ run_NFL_model <- function(outcome_ = "result" ,
                      outcome_ = outcome_ ,
                      fit_ = fit_ ,
                      home_fit_ = home_fit ,
-                     away_fit_ = away_fit
+                     away_fit_ = away_fit ,
+                     sparse_df = T
                      )
     )
   results_df <- eval_pred(
@@ -209,7 +218,8 @@ run_NFL_model <- function(outcome_ = "result" ,
                      outcome_ = outcome_ ,
                      fit_ = fit_ ,
                      home_fit_ = home_fit ,
-                     away_fit_ = away_fit)
+                     away_fit_ = away_fit ,
+                     sparse_df = T)
     )
   # print(results_df)
   pred_cover_pct <-mean(results_df$pred_cover , na.rm = T)
@@ -248,7 +258,7 @@ run_NFL_model <- function(outcome_ = "result" ,
   runtime <- round(as.numeric(difftime(stop_time , start_time , units = "mins")) , 2)
   print(paste("Total Runtime" , runtime , "mins"))
   print(paste("ATS Accuracy predicting " , outcome_ , "using " , method__ , "is " , round(accuracy , digits = 3) ))
-
+  print(paste("W_L Accuracy predicting " , outcome_ , "using " , method__ , "is " , round(accuracy_ns , digits = 3) ))
   # Extract model info ####
   model_info <- bind_cols(outcome = outcome_ ,
                           method = method__ ,
@@ -262,7 +272,7 @@ run_NFL_model <- function(outcome_ = "result" ,
                           games_predicted = nrow(results_df) ,
                           record = record ,
                           runtime = runtime ,
-                          test_season = test_season ,
+                          test_season = paste(as.character(test_season) , collapse = " , ")  ,
                           run_date = as.character(start_time) ,
                           used_RFE = used_RFE ,
                           rfe_funcs = funcs ,
@@ -323,36 +333,35 @@ run_NFL_model <- function(outcome_ = "result" ,
 }
 
 # Test run ####
-#
+
 # model_run <- run_NFL_model(outcome_ = "result" ,
 #                            method__ = "lm" ,
 #                            use_RFE = F ,
-#                            resample__ = 10 ,
-#                            repeats__ = 10 ,
+#                            resample__ = 5 ,
+#                            repeats__ = 5 ,
 #                            formula__ = "simple" ,
-#                            train_seasons = 2020:2023 ,
+#                            custom_formula = "result ~ home_elo + away_elo" ,
+#                            train_seasons = 2005:2019 ,
 #                            test_season = 2023 ,
 #                            scale_ = T ,
-#                            log_model_run_ = F ,
-#                            log_db_file = "data/test_models.db" ,
-#                            log_in_table = "test5" ,
-#                            log_pred = F ,
-#                            log_pred_db_file = "data/test_preds.db" ,
-#                            log_pred_in_table = "test7")
-# #
+#                            log_model_run_ = T ,
+#                            log_db_file = "data/BASE_MODELS_2024.db" ,
+#                            log_in_table = "test" ,
+#                            log_pred = T ,
+#                            log_pred_db_file = "data/BASE_MODEL_PREDICTIONS_2024.db" ,
+#                            log_pred_in_table = "test")
+
 # model_run$test_result_df %>% tabyl(pred_cover)
-#
 
 # con_ <- dbConnect(RSQLite::SQLite() , "data/test_pred.db")
 # dbListTables(con_)
 # pred <- dbGetQuery(con_ , "select * from frig_test5") # %>% select(-features)
 # pred %>% View("model_runs")
-# #
 
 # custom_formula =  build_formula("linedif" , drop_cols = "spread_line" , other_cols = c(home_int , away_int) ))
 
-# # Stacked model
-#
+# Stacked model
+
 # stacked_result_model <-  run_NFL_model(outcome_ = "result" ,
 #                                         method__  = "glmnet",
 #                                         resample_method_ = "repeatedcv",

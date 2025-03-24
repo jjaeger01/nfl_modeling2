@@ -27,6 +27,7 @@ first_season_ <- 1999
 current_season_ <- 2024
 
 # Import Game Data
+abbreviations <- read.csv(url("https://gist.githubusercontent.com/cnizzardini/13d0a072adb35a0d5817/raw/f315c97c7677845668a9c26e9093d0d550533b00/nfl_teams.csv"))
 gamesfull <- readRDS(url("http://www.habitatring.com/games.rds"))
 games <- gamesfull %>%
   filter(season >= first_season_ ) %>%
@@ -46,6 +47,40 @@ games <- gamesfull %>%
                                     labels = c(1:4) ,
                                     ordered_result = T) , )
 
+# IMPORT ELO ####
+elo_pre_2021_FULL <- read_csv("data-raw/nfl_elo.csv")
+elo_pre_2021 <- elo_pre_2021_FULL %>%
+  filter(season >= 1999 & season < 2021) %>%
+  select(date ,
+         season ,
+         home_team = team1 ,
+         away_team = team2 ,
+         home_elo = elo1_pre ,
+         away_elo = elo2_pre) %>%
+  mutate(gameday = as.character(ymd(as.Date(date , '%m/%d/%Y'))) ,
+         )
+
+elo_pre_2021$home_team[elo_pre_2021$home_team=="SD"]<-"LAC"
+elo_pre_2021$home_team[elo_pre_2021$home_team=="LAR"]<-"LA"
+elo_pre_2021$home_team[elo_pre_2021$home_team=="OAK"]<-"LV"
+elo_pre_2021$home_team[elo_pre_2021$home_team=="WSH"]<-"WAS"
+elo_pre_2021$home_team[elo_pre_2021$home_team=="STL"]<-"LA"
+elo_pre_2021$away_team[elo_pre_2021$away_team=="SD"]<-"LAC"
+elo_pre_2021$away_team[elo_pre_2021$away_team=="LAR"]<-"LA"
+elo_pre_2021$away_team[elo_pre_2021$away_team=="OAK"]<-"LV"
+elo_pre_2021$away_team[elo_pre_2021$away_team=="WSH"]<-"WAS"
+elo_pre_2021$away_team[elo_pre_2021$away_team=="STL"]<-"LA"
+
+elo_current_full <- read_csv(url("https://raw.githubusercontent.com/greerreNFL/nfelo/refs/heads/main/output_data/historic_projected_spreads.csv"))
+elo_current <- elo_current_full %>%
+  select(game_id , season , week , home_team , away_team , home_elo = home_nfelo_elo , away_elo = away_nfelo_elo) %>%
+  mutate(game_id = str_replace(game_id , "OAK" , "LV") ,
+         game_id = str_replace(game_id , "LAR" , "LA"))
+elo_current$home_team[elo_current$home_team=="LAR"]<-"LA"
+elo_current$home_team[elo_current$home_team=="OAK"]<-"LV"
+elo_current$away_team[elo_current$away_team=="LAR"]<-"LA"
+elo_current$away_team[elo_current$away_team=="OAK"]<-"LV"
+
 
 ## Relabel teams that have moved #####
 games$home_team[games$home_team=="STL"]<-"LA"
@@ -54,6 +89,15 @@ games$home_team[games$home_team=="OAK"]<-"LV"
 games$away_team[games$away_team=="STL"]<-"LA"
 games$away_team[games$away_team=="OAK"]<-"LV"
 games$away_team[games$away_team=="SD"]<-"LAC"
+
+# Add elo to games data ####
+
+games <- bind_rows(
+  games %>% filter(season >= 1999 & season < 2021) %>% left_join(elo_pre_2021) ,
+  games %>% filter(season >= 2021) %>% left_join(elo_current)
+) %>% mutate(across(contains("elo") , round , 2) ,
+             elo_dif = home_elo - away_elo)
+
 # IMPORT PBP DATA ###################################################
 
 

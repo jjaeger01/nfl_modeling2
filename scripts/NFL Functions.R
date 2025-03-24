@@ -29,8 +29,10 @@ create_modeldata <- function(outcome_ = "result" ,
   modeldata <- alldata %>%
     dplyr::select("game_id" , all_of(outcome_) ,
                   "div_game" , "spread_line" ,
+                  "home_elo" , "away_elo" ,
                   contains("prev")
     ) %>%
+    mutate(elo_dif = home_elo - away_elo) %>%
     rename_with(~str_replace(.,".prev_avg" , ".avg") , contains(".prev_avg")) %>%
     filter(substr(game_id , 1 , 4) %in% seasons)
 
@@ -74,7 +76,7 @@ game_outcomes <- function(game_data_){
 game_info <- function(game_data_){
   game_outcomes_ <- games %>%
     filter(game_id %in% game_data_$game_id) %>%
-    select(game_id , gameday , season , week , home_team , away_team , spread_line , spread_quint, total_line, home_moneyline,  away_moneyline) %>%
+    select(game_id , gameday , gametime , season , week , home_team , away_team , spread_line , spread_quint , total_line, home_moneyline,  away_moneyline) %>%
     mutate(as_of_time = as.character(lubridate::as_datetime(Sys.time())))
   return(game_outcomes_)
 }
@@ -134,7 +136,7 @@ ATS_record <- function(game_data_){
               )
 }
 
-pull_pred_week <- function(season_ , week_ , outcome_){
+pull_pred_week2 <- function(season_ , week_ , outcome_){
 
   pull_season <- ifelse(week_ == 1 , season_ - 1 , season_)
   pull_week_ <- ifelse(week_ == 1 , ifelse(season_ > 2020 , 18  , 17), week_ - 1) # Last week
@@ -197,6 +199,79 @@ pull_pred_week <- function(season_ , week_ , outcome_){
     ) %>%
     distinct(game_id , .keep_all = T) %>%
     mutate(season = season.x)
+  return(pred_week_)
+}
+
+pull_pred_week <- function(season_ , week_ , outcome_){
+
+  pull_season <- ifelse(week_ == 1 , season_ - 1 , season_)
+  pull_week_ <- ifelse(week_ == 1 , ifelse(season_ > 2020 , 18  , 17), week_ - 1) # Last week
+  pull_week_2_ <- ifelse(week_ == 1 , ifelse(season_ > 2020 , 18  , 17), week_ - 2) # Two weeks ago
+  outcome__ <- outcome_
+  if(outcome_ == "home_away_score"){
+    outcome__ <-  c("home_score" , "away_score")
+  }
+
+  # Base df for pred_week
+  current_week <-   alldata %>%
+    dplyr::select("season", "week" , "game_id" ,
+                  "home_team" , "away_team" , outcome__ ,
+                  "div_game" ,  "spread_line") %>%
+    filter(season == season_ , week == week_ ) %>%
+    mutate(pull_week = pull_week_)
+
+  # Pull post-average features from previous week
+  pull_week <-  team_agg %>%
+    dplyr::select("season", "week" , "game_id" , "posteam" ,
+                  "home_team" , "away_team" , outcome__ ,
+                  "div_game" ,  "spread_line" ,
+                  contains(".post") , contains("prev")) %>%
+    filter(season == pull_season , week == pull_week_ ) %>%
+    mutate(pull_week = pull_week_) %>%
+    rename_with(~ str_remove(., "post_"), everything())
+
+  # Pull post-average features from two weeks ago
+  pull_week_2 <- team_agg %>%
+    dplyr::select("season", "week" , "game_id" , "posteam" ,
+                  "home_team" , "away_team" , outcome__ ,
+                  "div_game" ,  "spread_line" ,
+                  contains(".post") , contains("prev")) %>%
+    filter(season == pull_season , week == pull_week_2_ ) %>%
+    mutate(pull_week = pull_week_2_) %>%
+    rename_with(~ str_remove(., "post_"), everything())
+
+  # Add last week post-avg features to pred_week base
+  pred_week_ <- current_week %>%
+    inner_join(pull_week %>% select(posteam , season ,  contains(".avg")) ,
+               by = join_by(home_team == posteam)) %>%
+    add_row(current_week %>%
+              anti_join(pull_week ,
+                        by = join_by(home_team == posteam)) %>%
+              select(-pull_week) %>%
+              inner_join(pull_week_2 %>%
+                           select(posteam , pull_week , season ,  contains(".avg")) ,
+                         by = join_by(home_team == posteam)
+              )
+    ) %>% left_join(
+      current_week %>%
+        inner_join(pull_week %>% select(posteam , season ,  contains(".avg")) ,
+                   by = join_by(away_team == posteam)) %>%
+        rename_at(vars(contains(".avg")) , function(x){paste(x,"_away" , sep = "")}) %>%
+        ## For pred_week rows in which either team had a bye the previous week: pull from two weeks ago
+        add_row(current_week %>%
+                  anti_join(pull_week ,
+                            by = join_by(away_team == posteam)) %>%
+                  select(-pull_week) %>%
+                  inner_join(pull_week_2 %>% select(posteam , pull_week , season ,  contains(".avg"))  ,
+                             by = join_by(away_team == posteam)) %>%
+                  rename_at(vars(contains(".avg")) , function(x){paste(x,"_away" , sep = "")})
+
+        ) %>%
+        distinct(game_id , .keep_all = T) %>%
+        mutate(season = season.x) ,
+      by = join_by(game_id) ,
+      suffix = c("" , ".y")
+    ) %>% select(-ends_with(".y"))
   return(pred_week_)
 }
 
@@ -324,7 +399,7 @@ make_predictions <- function(test_data ,
 
   pred_base <- test_data %>%
     mutate(pred = NA , pred_cover = NA , pred_win = NA , pred_linedif = NA , pred_home_score = NA , pred_away_score = NA) %>%
-    left_join(test_data %>% game_info() %>% select(game_id , point_spread = spread_line) , by = join_by(game_id))
+    left_join(test_data %>% game_info() %>% select(game_id , point_spread = spread_line , point_spread_quint = spread_quint)  , by = join_by(game_id))
 
   # print(test_data)
   if(use_model_scaling == T){
@@ -386,7 +461,7 @@ make_predictions <- function(test_data ,
   # predicted_data <- predicted_data %>% left_join(predicted_data %>% game_info() %>% select(game_id , point_spread = spread_line)) # This line re-adds the unscaled point spread
 
   if(sparse_df == T){
-    predicted_data <- predicted_data %>%  select(game_id , point_spread , pred , pred_cover , pred_home_score , pred_away_score, pred_linedif ,
+    predicted_data <- predicted_data %>%  select(game_id , point_spread , pred , pred_home_score , pred_away_score , pred_cover ,  pred_linedif ,
                                                  method , outcome , model_formula , feature_selection , spread_quint , pred_time)
     #   predicted_data <- predicted_data %>% left_join(pred_base %>% select(game_id , pred_prob))
     # }
@@ -402,8 +477,11 @@ eval_pred <- function(predicted_data ,
   # print(game_outcomes(predicted_data))
   # print(outcome_)
   test_outcomes <- game_outcomes(predicted_data) %>%
+    select(-c("spread_line")) %>%
     left_join(predicted_data %>%
-                select(game_id , pred , method , outcome , model_formula , feature_selection), by = join_by(game_id)  , suffix = c("" , ".close")
+                select(game_id , pred , pred_home_score , pred_away_score , method , outcome , model_formula , feature_selection ,
+                       spread_line = point_spread) , # USES POINTSPREAD FROM TIME OF PREDICTION
+              by = join_by(game_id)  , suffix = c("" , ".close")
     )
   if(outcome_ == "result"){
     test_outcomes <- test_outcomes %>%  mutate(
@@ -509,7 +587,8 @@ eval_pred <- function(predicted_data ,
       select(game_id , outcome ,
              home_team , away_team ,
              result , spread_line ,
-             pred , pred_linedif , pred_cover ,
+             pred , pred_home_score , pred_away_score ,
+             pred_linedif , pred_cover ,
              home_cover , model_win)
   }
   return(test_outcomes)
@@ -603,4 +682,5 @@ bets <- function(bets , amt , win_pct){
   # print(paste("Won $" , net ,  sep = ""))
   return(net)
 }
+
 

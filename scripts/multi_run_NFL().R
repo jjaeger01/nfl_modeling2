@@ -15,8 +15,9 @@ multi_run_NFL <- function(outcomes ,
 
   class_outcomes <- c("home_cover" , "home_win")
   reg_outcomes <- c("result" , "linedif" , "spread_line" , "home_away_score")
+
   class_methods <- c("bayesglm" , "glm" , "glmStepAIC"  , "glmnet" , "LogitBoost" , "glmboost" , "bstTree" , "xgbTree" , "knn") # , "xgbDART")
-  reg_methods <- c("bayesglm" , "lm" , "lmStepAIC" ,"BstLm" , "glmnet"  , "glmboost" , "xgbTree" , "xgbLinear" , "knn") # , "xgbDART" , "svmLinear3" , "svmPoly")
+  reg_methods <- c("lm" , "lmStepAIC" , "glmnet"  , "glmboost" , "xgbTree" , "xgbLinear" , "knn" , "xgbDART" , "svmLinear3" , "svmPoly")
 
   # Categorical ####
   for(i in seasons){
@@ -34,11 +35,11 @@ multi_run_NFL <- function(outcomes ,
       print(paste("Running models for" , oc , "using" , paste(methods , collapse = " , ")))
       for(model_ in methods){
         # print(i)
-        if(is.null(use_rfe_)){
-          use_rfe_ <- ifelse(model_ %in% c("lmStepAIC" , "glmnet" , "glmStepAIC") , F , T)
+        if(is.null(use_rfe_)|use_rfe_ == T){
+          use_rfe_ <- ifelse(model_ %in% c("lmStepAIC" , "glmnet" , "glmStepAIC" , "xgbTree" , "xgbLinear") , F , T)
         }
-        resample <- 10 # ifelse(model_ %in% c("xgbTree") , 10 , 5)
-        repeat_ <- 10 # ifelse(model_ %in% c("xgbTree") , 10 , 5)
+        resample <- 5 # ifelse(model_ %in% c("xgbTree") , 10 , 5)
+        repeat_ <- 5 # ifelse(model_ %in% c("xgbTree") , 10 , 5)
         model_run <- run_NFL_model(oc ,
                                    clusters_ = 10 ,
                                    method__ = model_ ,

@@ -75,5 +75,9 @@ predict_week <- function(season_ , week_ , outcome , NFL_MODEL){
 
 # predicted_week$FULL_PRED %>% log_prediction(db_file = "test_week_pred.db" , table_ = "test_table")
 
+# predict_week(current_season ,
+#              current_week ,
+#              model_$model_info$outcome ,
+#              model_)
 
 
